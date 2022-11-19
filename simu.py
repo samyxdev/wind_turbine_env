@@ -79,11 +79,24 @@ class Random_agent:
 
 
 class Epsgreedy_agent:
-	def __init__(self):
-		pass
+	q =[]
+	actions=[0, 1, 2]
+	eps=0
+	alpha=1
+	discount=1
+	def __init__(self,discount=1,eps=1):
+		self.q= np.random.random([360*STEP_PER_DEG, 3])*1e-8
+		#self.q= np.zeros([360*STEP_PER_DEG, 3])
+		self.eps=eps
+		self.discount=discount
 
-	def policy(self, rel_wind_heading, Q, eps) -> int:
-		return np.argmax(Q[relangle_to_index(rel_wind_heading)]) if rd.random() > eps else rd.choice([0, 1, 2])
+	def policy(self, rel_wind_heading) -> int:
+		return np.argmax(self.q[relangle_to_index(rel_wind_heading)]) if rd.random() > self.eps else rd.choice(self.actions)
+
+	def step(self,r,s,sp,a):
+		s=relangle_to_index(s)
+		sp=relangle_to_index(sp)
+		self.q[s,a]=( 1-self.alpha )* self.q[s,a] + self.alpha*( r + self.discount*max(self.q[sp] ))
 
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
@@ -92,6 +105,7 @@ class Epsgreedy_agent:
 # An agent to be completed
 class Custom_agent:
 	def __init__(self):
+
 		pass
 
 	def policy(self, rel_wind_heading) -> int:
@@ -99,6 +113,164 @@ class Custom_agent:
 
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
+
+def sigmoid(x):
+	return np.where(x >= 0, 
+			1 / (1 + np.exp(-x)), 
+			np.exp(x) / (1 + np.exp(x)))
+
+
+def grad_sigmoid(x):
+        return sigmoid(x) * (1- sigmoid(x))
+
+class LinSoftmax_agent:
+	w=[[]]
+	actions=[0, 1, 2]
+	def __init__(self):
+		#self.w=np.random.rand(3,5)
+		self.w=np.ones((3,5))
+
+	def predictor(self, rel_wind_heading, a):
+		s=self.feature(rel_wind_heading)
+		norm=np.exp(np.dot(self.w[0],s))+np.exp(np.dot(self.w[1],s))+np.exp(np.dot(self.w[2],s))
+		return float(np.exp(np.dot(self.w[a],s))/ norm)
+
+	def policy(self, rel_wind_heading) -> int:
+		ran=rd.random()
+		#print(ran,"          ",self.predictor(rounding_func(rel_wind_heading),0),"    ",self.predictor(rounding_func(rel_wind_heading),0) +self.predictor(rounding_func(rel_wind_heading),1))
+		if ran<=self.predictor(rounding_func(rel_wind_heading),0):
+			return 0
+		elif ran<=self.predictor(rounding_func(rel_wind_heading),0) +self.predictor(rounding_func(rel_wind_heading),1):
+			return 1
+		else:
+			return 2
+
+	def __str__(self):
+		return str(self.__class__) + ": " + str(self.__dict__)
+
+	def log_derivative(self,s,a):
+		s=self.feature(s)
+		norm=np.exp(np.dot(self.w[0],s))+np.exp(np.dot(self.w[1],s))+np.exp(np.dot(self.w[2],s))
+		grad=s-s*float(np.exp(np.dot(self.w[a],s))/norm)
+		ret=np.zeros([3,len(grad)])
+		ret[a]=grad
+		return ret
+	
+	def feature(self,s):
+		s=s/180
+		return np.array([1,s,s**2,s**3,s**4])
+
+class LinExp_agent:
+	w=[]
+	actions=[0, 1, 2]
+	def __init__(self):
+		self.w=np.random.rand(3)
+
+	def predictor(self, rel_wind_heading, a):
+		return np.exp(np.dot(self.w,[1,rel_wind_heading,a]))/sum([np.exp(np.dot(self.w,[1,rel_wind_heading,ac])) for ac in self.actions])
+
+	def policy(self, rel_wind_heading) -> int:
+		ran=rd.random()
+		if ran<=self.predictor(rounding_func(rel_wind_heading),0):
+			return 0
+		elif ran<=self.predictor(rounding_func(rel_wind_heading),0) +self.predictor(rounding_func(rel_wind_heading),1):
+			return 1
+		else:
+			return 2
+
+	def __str__(self):
+		return str(self.__class__) + ": " + str(self.__dict__)
+
+	def log_derivative(self,s,a):
+		return np.array([1,s,a])- sum([np.array([1,s,ac])*np.exp(np.dot(self.w,[1,s,ac])) for ac in self.actions])/sum([np.exp(np.dot(self.w,[1,s,ac])) for ac in self.actions])
+
+class QuadExp_agent:
+	w=[]
+	actions=[0, 1, 2]
+	def __init__(self):
+		self.w=np.random.rand(4)
+
+	def predictor(self, rel_wind_heading, a):
+		return np.exp(np.dot(self.w,np.array([1,rel_wind_heading,rel_wind_heading**2,a])/362))\
+			/sum([np.exp(np.dot(self.w,np.array([1,rel_wind_heading,rel_wind_heading**2,ac])/362)) for ac in self.actions]) 
+
+	def policy(self, rel_wind_heading) -> int:
+		ran=rd.random()
+		if ran<=self.predictor(rounding_func(rel_wind_heading),1):
+			return 1
+		elif ran<=self.predictor(rounding_func(rel_wind_heading),1) +self.predictor(rounding_func(rel_wind_heading),2):
+			return 2
+		else:
+			return 0
+
+	def __str__(self):
+		return str(self.__class__) + ": " + str(self.__dict__)
+
+	def log_derivative(self,s,a):
+		s=s/360
+		return np.array([1,s,s**2,a])/362- sum([np.array([1,s,s**2,a])/362*np.exp(np.dot(self.w,np.array([1,s,s**2,a])/362)) for ac in self.actions])/sum([np.exp(np.dot(self.w,np.array([1,s,s**2,a])/362)) for ac in self.actions])
+
+class QuadExp_no_agent:
+	w=[]
+	actions=[0, 1, 2]
+	def __init__(self):
+		self.w=np.random.rand(4)
+
+	def predictor(self, rel_wind_heading, a):
+		return np.exp(np.dot(self.w,np.array([1,rel_wind_heading,rel_wind_heading**2,a])/362))
+
+	def policy(self, rel_wind_heading) -> int:
+		ran=rd.random()
+		if ran<=self.predictor(rounding_func(rel_wind_heading),1):
+			return 1
+		elif ran<=self.predictor(rounding_func(rel_wind_heading),1) +self.predictor(rounding_func(rel_wind_heading),2):
+			return 2
+		else:
+			return 0
+
+	def __str__(self):
+		return str(self.__class__) + ": " + str(self.__dict__)
+
+	def log_derivative(self,s,a):
+		s=s/360
+		return np.array([1,s,s**2,a])
+
+class QuadExp_indip_agent:
+	w0=[]
+	w1=[]
+	w2=[]
+	actions=[0, 1, 2]
+	def __init__(self):
+		self.w1=np.random.rand(3)
+		self.w2=np.random.rand(3)
+		self.w0=np.random.rand(3)
+
+	def predictor(self, rel_wind_heading, a):
+		wind_norm=rel_wind_heading/360
+		norm=np.exp(np.dot(self.w1,[1,wind_norm,wind_norm**2]))+np.exp(np.dot(self.w2,[1,wind_norm,wind_norm**2]))+np.exp(np.dot(self.w0,[1,wind_norm,wind_norm**2]))
+		if a==0:
+			return np.exp(np.dot(self.w0,[1,wind_norm,wind_norm**2]))/norm
+		elif a==1:
+			return np.exp(np.dot(self.w1,[1,wind_norm,wind_norm**2]))/norm
+		else:
+			return np.exp(np.dot(self.w2,[1,wind_norm,wind_norm**2]))/norm
+
+	def policy(self, rel_wind_heading) -> int:
+		ran=rd.random()
+		if ran<=self.predictor(rounding_func(rel_wind_heading),1):
+			return 1
+		elif ran<=self.predictor(rounding_func(rel_wind_heading),1) +self.predictor(rounding_func(rel_wind_heading),2):
+			return 2
+		else:
+			return 0
+
+	def __str__(self):
+		return str(self.__class__) + ": " + str(self.__dict__)
+
+	def log_derivative(self,s,a):
+		s=s/360
+		return np.array([1,s,s**2,a])
+
 
 class Mapping_agent:
 	"""Agent that can be initialized with a fixed mapping state to action (= a policy).
@@ -154,40 +326,45 @@ class Simu:
 		# Generate new wind
 		self.wd.step()
 
-	def step_enhanced(self, action):
-		"""Step function returning the new state and the reward resulting from taking
-		the action passed in argument to this function."""
-		# Log the estimated wind (logging St)
+	def step_greedy(self, action):
+		# Log the estimated wind
 		self.rel_wind_heading_log[self.step_count] = wrap_to_m180_p180(self.wd.heading - self.wt.heading)
 
 		# Log the true wind
 		self.true_rel_wind_heading_log[self.step_count] = wrap_to_m180_p180(self.wd.heading - self.wt.true_heading)
 		self.wd_heading_log[self.step_count] = self.wd.heading
 
-		# Get action (logging At)
+		# Get action
 		self.action_log[self.step_count] = action
 
-		# Apply action and get power output (Logging Rt+1)
+		# Apply action and get power output
 		self.power_output_log[self.step_count] = self.wt.step(self.wd.speed, self.wd.heading, self.action_log[self.step_count])
 
 		# Generate new wind
 		self.wd.step()
 
-		# GymAI step function return format: St+1, Rt+1
+		# Like GymAI: S', R
 		return wrap_to_m180_p180(self.wd.heading - self.wt.heading), self.power_output_log[self.step_count]
 
 	
-	def manual_step(self, action):
-		"""Manually apply a step of the environnment
-		and returns new state and reward"""
-		if self.step_count < self.max_steps:
-			stp, rt = self.step_enhanced(action)
-			
-			self.step_count += 1
+	def manual_step(self):
+		# Log the estimated wind
+		self.rel_wind_heading_log[self.step_count] = wrap_to_m180_p180(self.wd.heading - self.wt.heading)
 
-			return stp, rt, self.step_count >= self.max_steps
-		else:
-			raise Exception("Max steps reached")
+		# Log the true wind
+		self.true_rel_wind_heading_log[self.step_count] = wrap_to_m180_p180(self.wd.heading - self.wt.true_heading)
+		self.wd_heading_log[self.step_count] = self.wd.heading
+
+		# Get action
+		self.action_log[self.step_count] = self.agent.policy(self.rel_wind_heading_log[self.step_count])
+
+		# Apply action and get power output
+		self.power_output_log[self.step_count] = self.wt.step(self.wd.speed, self.wd.heading, self.action_log[self.step_count])
+
+		# Generate new wind
+		self.wd.step()
+		return self.rel_wind_heading_log[self.step_count],wrap_to_m180_p180(self.wd.heading - self.wt.heading),\
+			self.power_output_log[self.step_count],self.action_log[self.step_count]
 
 	def run_simu(self):
 		while self.step_count < self.max_steps:
